@@ -1,0 +1,987 @@
+name: Build APK
+on:
+  push:
+    branches: [main, master]
+  workflow_dispatch:
+permissions:
+  contents: write
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 17
+      - name: Create project files
+        run: |
+          mkdir -p .
+          cat > settings.gradle.kts <<'TVHOME_EOF'
+          pluginManagement {
+              repositories { google(); mavenCentral(); gradlePluginPortal() }
+          }
+          dependencyResolutionManagement {
+              repositoriesMode.set(RepositoriesMode.FAIL_ON_PROJECT_REPOS)
+              repositories { google(); mavenCentral() }
+          }
+          rootProject.name = "TVHome"
+          include(":app")
+          TVHOME_EOF
+          mkdir -p .
+          cat > build.gradle.kts <<'TVHOME_EOF'
+          plugins {
+              id("com.android.application") version "8.5.2" apply false
+              id("org.jetbrains.kotlin.android") version "1.9.24" apply false
+          }
+          TVHOME_EOF
+          mkdir -p .
+          cat > gradle.properties <<'TVHOME_EOF'
+          org.gradle.jvmargs=-Xmx2g
+          android.useAndroidX=true
+          kotlin.code.style=official
+          TVHOME_EOF
+          mkdir -p app
+          cat > app/build.gradle.kts <<'TVHOME_EOF'
+          plugins {
+              id("com.android.application")
+              id("org.jetbrains.kotlin.android")
+          }
+
+          android {
+              namespace = "com.bridgeville.tvhome"
+              compileSdk = 34
+              defaultConfig {
+                  applicationId = "com.bridgeville.tvhome"
+                  minSdk = 23
+                  targetSdk = 34
+                  versionCode = 1
+                  versionName = "1.0"
+              }
+              compileOptions {
+                  sourceCompatibility = JavaVersion.VERSION_17
+                  targetCompatibility = JavaVersion.VERSION_17
+              }
+              kotlinOptions { jvmTarget = "17" }
+          }
+
+          dependencies {
+              implementation("androidx.core:core-ktx:1.13.1")
+              implementation("androidx.recyclerview:recyclerview:1.3.2")
+          }
+          TVHOME_EOF
+          mkdir -p app/src/main
+          cat > app/src/main/AndroidManifest.xml <<'TVHOME_EOF'
+          <?xml version="1.0" encoding="utf-8"?>
+          <manifest xmlns:android="http://schemas.android.com/apk/res/android">
+
+              <uses-feature android:name="android.software.leanback" android:required="false" />
+              <uses-feature android:name="android.hardware.touchscreen" android:required="false" />
+              <uses-permission android:name="android.permission.INTERNET" />
+
+              <queries>
+                  <intent>
+                      <action android:name="android.intent.action.MAIN" />
+                      <category android:name="android.intent.category.LEANBACK_LAUNCHER" />
+                  </intent>
+                  <intent>
+                      <action android:name="android.intent.action.MAIN" />
+                      <category android:name="android.intent.category.LAUNCHER" />
+                  </intent>
+              </queries>
+
+              <application
+                  android:allowBackup="true"
+                  android:icon="@drawable/ic_launcher"
+                  android:banner="@drawable/banner"
+                  android:label="TV Home"
+                  android:supportsRtl="true"
+                  android:theme="@style/AppTheme">
+                  <activity
+                      android:name=".MainActivity"
+                      android:exported="true"
+                      android:launchMode="singleTask"
+                      android:stateNotNeeded="true"
+                      android:configChanges="keyboard|keyboardHidden|navigation|orientation|screenSize|uiMode|density">
+                      <intent-filter>
+                          <action android:name="android.intent.action.MAIN" />
+                          <category android:name="android.intent.category.LEANBACK_LAUNCHER" />
+                          <category android:name="android.intent.category.LAUNCHER" />
+                      </intent-filter>
+                      <intent-filter>
+                          <action android:name="android.intent.action.MAIN" />
+                          <category android:name="android.intent.category.HOME" />
+                          <category android:name="android.intent.category.DEFAULT" />
+                      </intent-filter>
+                  </activity>
+              </application>
+          </manifest>
+          TVHOME_EOF
+          mkdir -p app/src/main/res/values
+          cat > app/src/main/res/values/styles.xml <<'TVHOME_EOF'
+          <?xml version="1.0" encoding="utf-8"?>
+          <resources>
+              <style name="AppTheme" parent="@android:style/Theme.DeviceDefault.NoActionBar">
+                  <item name="android:windowBackground">@android:color/black</item>
+              </style>
+          </resources>
+          TVHOME_EOF
+          mkdir -p app/src/main/res/drawable
+          cat > app/src/main/res/drawable/ic_launcher.xml <<'TVHOME_EOF'
+          <vector xmlns:android="http://schemas.android.com/apk/res/android"
+              android:width="108dp" android:height="108dp"
+              android:viewportWidth="108" android:viewportHeight="108">
+              <path android:fillColor="#1B2A49" android:pathData="M0,0h108v108h-108z" />
+              <path android:fillColor="#FFFFFF" android:pathData="M54,26L82,50L82,82L26,82L26,50Z" />
+          </vector>
+          TVHOME_EOF
+          mkdir -p app/src/main/res/drawable
+          cat > app/src/main/res/drawable/banner.xml <<'TVHOME_EOF'
+          <vector xmlns:android="http://schemas.android.com/apk/res/android"
+              android:width="320dp" android:height="180dp"
+              android:viewportWidth="320" android:viewportHeight="180">
+              <path android:fillColor="#1B2A49" android:pathData="M0,0h320v180h-320z" />
+              <path android:fillColor="#FFFFFF" android:pathData="M160,45L205,85L205,135L115,135L115,85Z" />
+          </vector>
+          TVHOME_EOF
+          mkdir -p app/src/main/java/com/bridgeville/tvhome
+          cat > app/src/main/java/com/bridgeville/tvhome/Models.kt <<'TVHOME_EOF'
+          package com.bridgeville.tvhome
+
+          import android.graphics.drawable.Drawable
+
+          data class AppItem(
+              val pkg: String,
+              val defLabel: String,
+              val art: Drawable?,
+              val isIcon: Boolean,
+              val special: Boolean = false
+          )
+          TVHOME_EOF
+          mkdir -p app/src/main/java/com/bridgeville/tvhome
+          cat > app/src/main/java/com/bridgeville/tvhome/Prefs.kt <<'TVHOME_EOF'
+          package com.bridgeville.tvhome
+
+          import android.content.Context
+
+          class Prefs(ctx: Context) {
+              private val sp = ctx.getSharedPreferences("tvhome", Context.MODE_PRIVATE)
+
+              var order: List<String>
+                  get() = (sp.getString("order", "") ?: "").split(",").filter { it.isNotEmpty() }
+                  set(v) { sp.edit().putString("order", v.joinToString(",")).apply() }
+
+              var hidden: Set<String>
+                  get() = HashSet(sp.getStringSet("hidden", emptySet()) ?: emptySet())
+                  set(v) { sp.edit().putStringSet("hidden", HashSet(v)).apply() }
+
+              fun label(pkg: String): String? = sp.getString("label_$pkg", null)
+              fun setLabel(pkg: String, s: String?) {
+                  if (s.isNullOrBlank()) sp.edit().remove("label_$pkg").apply()
+                  else sp.edit().putString("label_$pkg", s.trim()).apply()
+              }
+
+              var city: String
+                  get() = sp.getString("city", "Bridgeville, PA") ?: "Bridgeville, PA"
+                  set(v) { sp.edit().putString("city", v).apply() }
+              var lat: Double
+                  get() = (sp.getString("lat", "40.3573") ?: "40.3573").toDouble()
+                  set(v) { sp.edit().putString("lat", v.toString()).apply() }
+              var lon: Double
+                  get() = (sp.getString("lon", "-80.1115") ?: "-80.1115").toDouble()
+                  set(v) { sp.edit().putString("lon", v.toString()).apply() }
+
+              var fahrenheit: Boolean
+                  get() = sp.getBoolean("f", true)
+                  set(v) { sp.edit().putBoolean("f", v).apply() }
+              var tileSize: Int
+                  get() = sp.getInt("tile", 1)
+                  set(v) { sp.edit().putInt("tile", v).apply() }
+              var rows: Int
+                  get() = sp.getInt("rows", 1)
+                  set(v) { sp.edit().putInt("rows", v).apply() }
+              var bg: Int
+                  get() = sp.getInt("bg", 0)
+                  set(v) { sp.edit().putInt("bg", v).apply() }
+              var clock24: Boolean
+                  get() = sp.getBoolean("c24", false)
+                  set(v) { sp.edit().putBoolean("c24", v).apply() }
+
+              var cache: String?
+                  get() = sp.getString("wx", null)
+                  set(v) { sp.edit().putString("wx", v).apply() }
+              var cacheMeta: String?
+                  get() = sp.getString("wxmeta", null)
+                  set(v) { sp.edit().putString("wxmeta", v).apply() }
+          }
+          TVHOME_EOF
+          mkdir -p app/src/main/java/com/bridgeville/tvhome
+          cat > app/src/main/java/com/bridgeville/tvhome/Weather.kt <<'TVHOME_EOF'
+          package com.bridgeville.tvhome
+
+          import org.json.JSONObject
+          import java.net.HttpURLConnection
+          import java.net.URL
+          import java.net.URLEncoder
+          import java.text.SimpleDateFormat
+          import java.util.Locale
+          import kotlin.math.roundToInt
+
+          object Weather {
+              data class Day(val name: String, val code: Int, val hi: Int, val lo: Int)
+              data class Wx(val temp: Int, val code: Int, val hi: Int, val lo: Int, val days: List<Day>)
+              data class Place(val label: String, val lat: Double, val lon: Double)
+
+              private fun get(u: String): String? = try {
+                  val c = URL(u).openConnection() as HttpURLConnection
+                  c.connectTimeout = 8000
+                  c.readTimeout = 8000
+                  c.inputStream.bufferedReader().use { it.readText() }
+              } catch (e: Exception) {
+                  null
+              }
+
+              fun fetchRaw(lat: Double, lon: Double, f: Boolean): String? {
+                  val unit = if (f) "fahrenheit" else "celsius"
+                  return get(
+                      "https://api.open-meteo.com/v1/forecast?latitude=$lat&longitude=$lon" +
+                          "&current=temperature_2m,weather_code" +
+                          "&daily=weather_code,temperature_2m_max,temperature_2m_min" +
+                          "&temperature_unit=$unit&timezone=auto&forecast_days=5"
+                  )
+              }
+
+              fun parse(raw: String): Wx? = try {
+                  val j = JSONObject(raw)
+                  val cur = j.getJSONObject("current")
+                  val d = j.getJSONObject("daily")
+                  val t = d.getJSONArray("time")
+                  val codes = d.getJSONArray("weather_code")
+                  val hi = d.getJSONArray("temperature_2m_max")
+                  val lo = d.getJSONArray("temperature_2m_min")
+                  val inFmt = SimpleDateFormat("yyyy-MM-dd", Locale.US)
+                  val outFmt = SimpleDateFormat("EEE", Locale.getDefault())
+                  val days = (0 until t.length()).map { i ->
+                      Day(
+                          outFmt.format(inFmt.parse(t.getString(i))!!),
+                          codes.getInt(i),
+                          hi.getDouble(i).roundToInt(),
+                          lo.getDouble(i).roundToInt()
+                      )
+                  }
+                  Wx(cur.getDouble("temperature_2m").roundToInt(), cur.getInt("weather_code"), days[0].hi, days[0].lo, days)
+              } catch (e: Exception) {
+                  null
+              }
+
+              fun geocode(q: String): List<Place> {
+                  val raw = get(
+                      "https://geocoding-api.open-meteo.com/v1/search?name=" +
+                          URLEncoder.encode(q, "UTF-8") + "&count=6&language=en&format=json"
+                  ) ?: return emptyList()
+                  return try {
+                      val arr = JSONObject(raw).optJSONArray("results") ?: return emptyList()
+                      (0 until arr.length()).map { i ->
+                          val o = arr.getJSONObject(i)
+                          val admin = o.optString("admin1", "")
+                          val cc = o.optString("country_code", "")
+                          var label = o.getString("name")
+                          if (admin.isNotEmpty()) label += ", $admin"
+                          if (cc.isNotEmpty() && cc != "US") label += ", $cc"
+                          Place(label, o.getDouble("latitude"), o.getDouble("longitude"))
+                      }
+                  } catch (e: Exception) {
+                      emptyList()
+                  }
+              }
+
+              fun describe(code: Int): Pair<String, String> = when (code) {
+                  0 -> Pair("☀️", "Clear")
+                  1 -> Pair("🌤️", "Mostly clear")
+                  2 -> Pair("⛅", "Partly cloudy")
+                  3 -> Pair("☁️", "Overcast")
+                  45, 48 -> Pair("🌫️", "Fog")
+                  51, 53, 55, 56, 57 -> Pair("🌦️", "Drizzle")
+                  61, 63, 65, 66, 67 -> Pair("🌧️", "Rain")
+                  71, 73, 75, 77 -> Pair("❄️", "Snow")
+                  80, 81, 82 -> Pair("🌧️", "Showers")
+                  85, 86 -> Pair("🌨️", "Snow showers")
+                  95, 96, 99 -> Pair("⛈️", "Thunderstorm")
+                  else -> Pair("🌡️", "Weather")
+              }
+          }
+          TVHOME_EOF
+          mkdir -p app/src/main/java/com/bridgeville/tvhome
+          cat > app/src/main/java/com/bridgeville/tvhome/AppAdapter.kt <<'TVHOME_EOF'
+          package com.bridgeville.tvhome
+
+          import android.graphics.Color
+          import android.graphics.Outline
+          import android.graphics.drawable.GradientDrawable
+          import android.text.TextUtils
+          import android.view.Gravity
+          import android.view.View
+          import android.view.ViewGroup
+          import android.view.ViewOutlineProvider
+          import android.widget.FrameLayout
+          import android.widget.ImageView
+          import android.widget.LinearLayout
+          import android.widget.TextView
+          import androidx.recyclerview.widget.RecyclerView
+
+          class AppAdapter(private val act: MainActivity) : RecyclerView.Adapter<AppAdapter.VH>() {
+              var items: MutableList<AppItem> = mutableListOf()
+              var tileW = 220
+              var movingPkg: String? = null
+
+              class VH(
+                  val root: LinearLayout,
+                  val card: FrameLayout,
+                  val img: ImageView,
+                  val glyph: TextView,
+                  val label: TextView,
+                  val ring: GradientDrawable
+              ) : RecyclerView.ViewHolder(root)
+
+              override fun onCreateViewHolder(parent: ViewGroup, viewType: Int): VH {
+                  val c = parent.context
+                  val d = c.resources.displayMetrics.density
+                  val radius = 14 * d
+                  val ring = GradientDrawable()
+                  ring.setColor(Color.TRANSPARENT)
+                  ring.setStroke((3 * d).toInt(), Color.WHITE)
+                  ring.cornerRadius = radius
+                  ring.setAlpha(0)
+
+                  val card = FrameLayout(c)
+                  card.isFocusable = true
+                  card.isClickable = true
+                  card.isLongClickable = true
+                  val bgd = GradientDrawable()
+                  bgd.setColor(0xFF23262D.toInt())
+                  bgd.cornerRadius = radius
+                  card.background = bgd
+                  card.foreground = ring
+                  card.clipToOutline = true
+                  card.outlineProvider = object : ViewOutlineProvider() {
+                      override fun getOutline(view: View, outline: Outline) {
+                          outline.setRoundRect(0, 0, view.width, view.height, radius)
+                      }
+                  }
+
+                  val img = ImageView(c)
+                  card.addView(img, FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT))
+                  val glyph = TextView(c)
+                  glyph.text = "⚙️"
+                  glyph.textSize = 46f
+                  glyph.setTextColor(Color.WHITE)
+                  glyph.gravity = Gravity.CENTER
+                  glyph.visibility = View.GONE
+                  card.addView(glyph, FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT))
+
+                  val label = TextView(c)
+                  label.setTextColor(Color.WHITE)
+                  label.textSize = 16f
+                  label.gravity = Gravity.CENTER
+                  label.maxLines = 1
+                  label.ellipsize = TextUtils.TruncateAt.END
+                  label.alpha = 0f
+                  label.setPadding(0, (14 * d).toInt(), 0, 0)
+
+                  val root = LinearLayout(c)
+                  root.orientation = LinearLayout.VERTICAL
+                  root.clipChildren = false
+                  val lp = RecyclerView.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT)
+                  lp.setMargins((12 * d).toInt(), (10 * d).toInt(), (12 * d).toInt(), 0)
+                  root.layoutParams = lp
+                  root.addView(card, LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT))
+                  root.addView(label, LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT))
+
+                  val vh = VH(root, card, img, glyph, label, ring)
+                  card.setOnFocusChangeListener { _, has -> applyFocus(vh, has) }
+                  card.setOnClickListener {
+                      val p = vh.bindingAdapterPosition
+                      if (p >= 0) act.onTileClick(items[p])
+                  }
+                  card.setOnLongClickListener {
+                      val p = vh.bindingAdapterPosition
+                      if (p >= 0) act.onTileLong(items[p])
+                      true
+                  }
+                  return vh
+              }
+
+              override fun onBindViewHolder(h: VH, position: Int) {
+                  val item = items[position]
+                  val d = h.root.resources.displayMetrics.density
+                  val w = (tileW * d).toInt()
+                  val ht = w * 9 / 16
+                  h.card.layoutParams = LinearLayout.LayoutParams(w, ht)
+                  h.label.layoutParams = LinearLayout.LayoutParams(w, ViewGroup.LayoutParams.WRAP_CONTENT)
+                  h.label.text = act.labelFor(item)
+                  if (item.special) {
+                      h.img.setImageDrawable(null)
+                      h.glyph.visibility = View.VISIBLE
+                  } else {
+                      h.glyph.visibility = View.GONE
+                      h.img.setImageDrawable(item.art)
+                      if (item.isIcon) {
+                          h.img.scaleType = ImageView.ScaleType.FIT_CENTER
+                          val p = (ht * 0.2f).toInt()
+                          h.img.setPadding(p, p, p, p)
+                      } else {
+                          h.img.scaleType = ImageView.ScaleType.CENTER_CROP
+                          h.img.setPadding(0, 0, 0, 0)
+                      }
+                  }
+                  applyFocus(h, h.card.hasFocus())
+              }
+
+              override fun getItemCount() = items.size
+
+              private fun isMoving(h: VH): Boolean {
+                  val p = h.bindingAdapterPosition
+                  return p >= 0 && p < items.size && movingPkg != null && items[p].pkg == movingPkg
+              }
+
+              private fun applyFocus(h: VH, has: Boolean) {
+                  val d = h.root.resources.displayMetrics.density
+                  val moving = isMoving(h)
+                  val s = if (!has) 1f else if (moving) 1.22f else 1.14f
+                  h.card.animate().scaleX(s).scaleY(s).translationZ(if (has) 24 * d else 0f).setDuration(130).start()
+                  h.ring.setStroke((3 * d).toInt(), if (moving) 0xFFFFC107.toInt() else Color.WHITE)
+                  h.ring.setAlpha(if (has) 255 else 0)
+                  h.label.animate().alpha(if (has) 1f else 0f).setDuration(130).start()
+              }
+          }
+          TVHOME_EOF
+          mkdir -p app/src/main/java/com/bridgeville/tvhome
+          cat > app/src/main/java/com/bridgeville/tvhome/MainActivity.kt <<'TVHOME_EOF'
+          package com.bridgeville.tvhome
+
+          import android.app.Activity
+          import android.app.AlertDialog
+          import android.content.BroadcastReceiver
+          import android.content.Context
+          import android.content.Intent
+          import android.content.IntentFilter
+          import android.graphics.Color
+          import android.graphics.Typeface
+          import android.graphics.drawable.Drawable
+          import android.graphics.drawable.GradientDrawable
+          import android.net.Uri
+          import android.os.Bundle
+          import android.os.Handler
+          import android.os.Looper
+          import android.provider.Settings
+          import android.view.Gravity
+          import android.view.KeyEvent
+          import android.view.View
+          import android.view.ViewGroup
+          import android.widget.EditText
+          import android.widget.FrameLayout
+          import android.widget.LinearLayout
+          import android.widget.TextClock
+          import android.widget.TextView
+          import android.widget.Toast
+          import androidx.recyclerview.widget.GridLayoutManager
+          import androidx.recyclerview.widget.RecyclerView
+          import androidx.recyclerview.widget.SimpleItemAnimator
+          import java.util.concurrent.Executors
+
+          class MainActivity : Activity() {
+
+              private lateinit var prefs: Prefs
+              private lateinit var adapter: AppAdapter
+              private lateinit var rv: RecyclerView
+              private lateinit var root: FrameLayout
+              private lateinit var tvTemp: TextView
+              private lateinit var tvDesc: TextView
+              private lateinit var forecast: LinearLayout
+              private lateinit var clock: TextClock
+              private lateinit var date: TextClock
+              private lateinit var hint: TextView
+
+              private val io = Executors.newSingleThreadExecutor()
+              private val ui = Handler(Looper.getMainLooper())
+              private var allApps: Map<String, AppItem> = emptyMap()
+              private var lastWx = 0L
+
+              private val dlgTheme = android.R.style.Theme_DeviceDefault_Dialog_Alert
+              private val sizes = intArrayOf(170, 220, 280)
+              private val sizeNames = arrayOf("Small", "Medium", "Large")
+              private val bgNames = arrayOf("Midnight", "Aurora", "Sunset", "Graphite", "Black")
+
+              private val reload = Runnable { loadApps(false) }
+              private val pkgReceiver = object : BroadcastReceiver() {
+                  override fun onReceive(c: Context?, i: Intent?) {
+                      ui.removeCallbacks(reload)
+                      ui.postDelayed(reload, 800)
+                  }
+              }
+
+              private fun dp(v: Int) = (v * resources.displayMetrics.density).toInt()
+
+              // ---------------------------------------------------------------- lifecycle
+
+              override fun onCreate(savedInstanceState: Bundle?) {
+                  super.onCreate(savedInstanceState)
+                  prefs = Prefs(this)
+                  buildUi()
+                  applyBackground()
+                  applyClock()
+                  applyLayoutPrefs()
+                  showCachedWeather()
+                  loadApps(true)
+                  refreshWeather(true)
+                  val f = IntentFilter()
+                  f.addAction(Intent.ACTION_PACKAGE_ADDED)
+                  f.addAction(Intent.ACTION_PACKAGE_REMOVED)
+                  f.addAction(Intent.ACTION_PACKAGE_REPLACED)
+                  f.addDataScheme("package")
+                  registerReceiver(pkgReceiver, f)
+              }
+
+              override fun onResume() {
+                  super.onResume()
+                  refreshWeather(false)
+              }
+
+              override fun onNewIntent(intent: Intent?) {
+                  super.onNewIntent(intent)
+                  if (intent?.hasCategory(Intent.CATEGORY_HOME) == true) {
+                      if (adapter.movingPkg != null) endMove()
+                      focusAt(0)
+                  }
+              }
+
+              override fun onDestroy() {
+                  super.onDestroy()
+                  try { unregisterReceiver(pkgReceiver) } catch (e: Exception) { }
+              }
+
+              // ---------------------------------------------------------------- UI
+
+              private fun light(v: TextView) { v.typeface = Typeface.create("sans-serif-light", Typeface.NORMAL) }
+
+              private fun buildUi() {
+                  root = FrameLayout(this)
+                  root.clipChildren = false
+
+                  val content = LinearLayout(this)
+                  content.orientation = LinearLayout.VERTICAL
+                  content.clipChildren = false
+                  content.setPadding(dp(56), dp(36), dp(56), dp(16))
+
+                  val header = LinearLayout(this)
+                  header.orientation = LinearLayout.HORIZONTAL
+
+                  val left = LinearLayout(this)
+                  left.orientation = LinearLayout.VERTICAL
+                  tvTemp = TextView(this)
+                  tvTemp.setTextColor(Color.WHITE)
+                  tvTemp.textSize = 54f
+                  tvTemp.text = "…"
+                  light(tvTemp)
+                  tvDesc = TextView(this)
+                  tvDesc.setTextColor(0xCCFFFFFF.toInt())
+                  tvDesc.textSize = 18f
+                  forecast = LinearLayout(this)
+                  forecast.orientation = LinearLayout.HORIZONTAL
+                  forecast.setPadding(0, dp(14), 0, 0)
+                  left.addView(tvTemp)
+                  left.addView(tvDesc)
+                  left.addView(forecast)
+
+                  val right = LinearLayout(this)
+                  right.orientation = LinearLayout.VERTICAL
+                  right.gravity = Gravity.END
+                  clock = TextClock(this)
+                  clock.textSize = 64f
+                  clock.setTextColor(Color.WHITE)
+                  light(clock)
+                  date = TextClock(this)
+                  date.textSize = 20f
+                  date.setTextColor(0xCCFFFFFF.toInt())
+                  date.format12Hour = "EEEE, MMMM d"
+                  date.format24Hour = "EEEE, MMMM d"
+                  date.gravity = Gravity.END
+                  right.addView(clock)
+                  right.addView(date)
+
+                  header.addView(left, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
+                  header.addView(right, LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT))
+                  content.addView(header, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT))
+                  content.addView(View(this), LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f))
+
+                  adapter = AppAdapter(this)
+                  rv = RecyclerView(this)
+                  rv.adapter = adapter
+                  rv.clipToPadding = false
+                  rv.clipChildren = false
+                  rv.overScrollMode = View.OVER_SCROLL_NEVER
+                  rv.setPadding(dp(44), dp(24), dp(44), dp(20))
+                  (rv.itemAnimator as? SimpleItemAnimator)?.supportsChangeAnimations = false
+                  content.addView(rv, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT))
+
+                  hint = TextView(this)
+                  hint.setTextColor(0xFFFFC107.toInt())
+                  hint.textSize = 16f
+                  hint.gravity = Gravity.CENTER
+                  hint.visibility = View.GONE
+                  content.addView(hint, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT))
+
+                  root.addView(content, FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT))
+                  setContentView(root)
+              }
+
+              private fun applyBackground() {
+                  val c = when (prefs.bg) {
+                      0 -> intArrayOf(0xFF0B1220.toInt(), 0xFF1B2A49.toInt())
+                      1 -> intArrayOf(0xFF0A1F1C.toInt(), 0xFF0F4C5C.toInt(), 0xFF3B2667.toInt())
+                      2 -> intArrayOf(0xFF1F1135.toInt(), 0xFF8A2E5C.toInt(), 0xFFE0703F.toInt())
+                      3 -> intArrayOf(0xFF101114.toInt(), 0xFF2A2D34.toInt())
+                      else -> intArrayOf(0xFF000000.toInt(), 0xFF000000.toInt())
+                  }
+                  root.background = GradientDrawable(GradientDrawable.Orientation.TL_BR, c)
+              }
+
+              private fun applyClock() {
+                  val f = if (prefs.clock24) "HH:mm" else "h:mm a"
+                  clock.format12Hour = f
+                  clock.format24Hour = f
+              }
+
+              private fun applyLayoutPrefs() {
+                  adapter.tileW = sizes[prefs.tileSize.coerceIn(0, 2)]
+                  rv.layoutManager = GridLayoutManager(this, prefs.rows.coerceIn(1, 2), GridLayoutManager.HORIZONTAL, false)
+                  adapter.notifyDataSetChanged()
+              }
+
+              fun labelFor(item: AppItem): String =
+                  if (item.special) "Customize" else (prefs.label(item.pkg) ?: item.defLabel)
+
+              // ---------------------------------------------------------------- apps
+
+              private fun loadApps(initial: Boolean) {
+                  io.execute {
+                      val pm = packageManager
+                      val seen = LinkedHashMap<String, AppItem>()
+                      for (cat in arrayOf(Intent.CATEGORY_LEANBACK_LAUNCHER, Intent.CATEGORY_LAUNCHER)) {
+                          val q = Intent(Intent.ACTION_MAIN).addCategory(cat)
+                          for (ri in pm.queryIntentActivities(q, 0)) {
+                              val p = ri.activityInfo.packageName
+                              if (p == packageName || seen.containsKey(p)) continue
+                              var banner: Drawable? = null
+                              try { banner = ri.activityInfo.loadBanner(pm) } catch (e: Exception) { }
+                              val art = banner ?: ri.loadIcon(pm)
+                              seen[p] = AppItem(p, ri.loadLabel(pm).toString(), art, banner == null)
+                          }
+                      }
+                      ui.post {
+                          allApps = seen
+                          rebuildList(if (initial) 0 else -1)
+                      }
+                  }
+              }
+
+              private fun rebuildList(focus: Int) {
+                  val hidden = prefs.hidden
+                  val saved = prefs.order
+                  val vis = allApps.filterKeys { it !in hidden }
+                  val ordered = saved.mapNotNull { vis[it] } +
+                      vis.values.filter { it.pkg !in saved }.sortedBy { it.defLabel.lowercase() }
+                  val list = ordered.toMutableList()
+                  list.add(AppItem("__settings", "Customize", null, false, true))
+                  adapter.items = list
+                  adapter.notifyDataSetChanged()
+                  if (focus >= 0) rv.postDelayed({ focusAt(focus) }, 80)
+              }
+
+              private fun focusAt(pos: Int) {
+                  val p = pos.coerceIn(0, maxOf(0, adapter.items.size - 1))
+                  rv.scrollToPosition(p)
+                  rv.post { (rv.findViewHolderForAdapterPosition(p) as? AppAdapter.VH)?.card?.requestFocus() }
+              }
+
+              fun onTileClick(item: AppItem) {
+                  if (item.special) { showSettings(); return }
+                  val pm = packageManager
+                  val i = pm.getLeanbackLaunchIntentForPackage(item.pkg) ?: pm.getLaunchIntentForPackage(item.pkg)
+                  if (i == null) {
+                      Toast.makeText(this, "Can't open that app", Toast.LENGTH_SHORT).show()
+                      return
+                  }
+                  try { startActivity(i) } catch (e: Exception) {
+                      Toast.makeText(this, "Can't open that app", Toast.LENGTH_SHORT).show()
+                  }
+              }
+
+              fun onTileLong(item: AppItem) {
+                  if (item.special) return
+                  val opts = arrayOf("Move", "Rename", "Hide", "App info")
+                  AlertDialog.Builder(this, dlgTheme)
+                      .setTitle(labelFor(item))
+                      .setItems(opts) { _, w ->
+                          when (w) {
+                              0 -> startMove(item)
+                              1 -> askRename(item)
+                              2 -> {
+                                  val pos = adapter.items.indexOfFirst { it.pkg == item.pkg }
+                                  prefs.hidden = prefs.hidden + item.pkg
+                                  rebuildList(pos)
+                                  Toast.makeText(this, "Hidden. Restore it in Customize.", Toast.LENGTH_LONG).show()
+                              }
+                              3 -> try {
+                                  startActivity(Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS, Uri.parse("package:" + item.pkg)))
+                              } catch (e: Exception) { }
+                          }
+                      }
+                      .show()
+              }
+
+              private fun askRename(item: AppItem) {
+                  val input = EditText(this)
+                  input.setSingleLine(true)
+                  input.setText(labelFor(item))
+                  AlertDialog.Builder(this, dlgTheme)
+                      .setTitle("Rename")
+                      .setView(input)
+                      .setPositiveButton("Save") { _, _ ->
+                          prefs.setLabel(item.pkg, input.text.toString())
+                          adapter.notifyDataSetChanged()
+                      }
+                      .setNeutralButton("Reset") { _, _ ->
+                          prefs.setLabel(item.pkg, null)
+                          adapter.notifyDataSetChanged()
+                      }
+                      .setNegativeButton("Cancel", null)
+                      .show()
+              }
+
+              // ---------------------------------------------------------------- moving
+
+              private fun startMove(item: AppItem) {
+                  adapter.movingPkg = item.pkg
+                  hint.text = "Use the arrow keys to move this app  ·  press OK to drop"
+                  hint.visibility = View.VISIBLE
+                  val p = adapter.items.indexOfFirst { it.pkg == item.pkg }
+                  if (p >= 0) { adapter.notifyItemChanged(p); refocus(p) }
+              }
+
+              private fun moveBy(delta: Int) {
+                  val mp = adapter.movingPkg ?: return
+                  val cur = adapter.items.indexOfFirst { it.pkg == mp }
+                  if (cur < 0) return
+                  val last = adapter.items.size - 2 // keep Customize tile last
+                  val target = (cur + delta).coerceIn(0, maxOf(0, last))
+                  if (target == cur) return
+                  val it = adapter.items.removeAt(cur)
+                  adapter.items.add(target, it)
+                  adapter.notifyItemMoved(cur, target)
+                  rv.scrollToPosition(target)
+                  refocus(target)
+              }
+
+              private fun endMove() {
+                  val mp = adapter.movingPkg ?: return
+                  val p = adapter.items.indexOfFirst { it.pkg == mp }
+                  adapter.movingPkg = null
+                  hint.visibility = View.GONE
+                  val vis = adapter.items.filter { !it.special }.map { it.pkg }
+                  prefs.order = vis + prefs.order.filter { it !in vis }
+                  if (p >= 0) { adapter.notifyItemChanged(p); refocus(p) }
+              }
+
+              private fun refocus(pos: Int) {
+                  rv.post { (rv.findViewHolderForAdapterPosition(pos) as? AppAdapter.VH)?.card?.requestFocus() }
+              }
+
+              override fun dispatchKeyEvent(e: KeyEvent): Boolean {
+                  val k = e.keyCode
+                  if (adapter.movingPkg != null) {
+                      val ours = k == KeyEvent.KEYCODE_DPAD_LEFT || k == KeyEvent.KEYCODE_DPAD_RIGHT ||
+                          k == KeyEvent.KEYCODE_DPAD_UP || k == KeyEvent.KEYCODE_DPAD_DOWN ||
+                          k == KeyEvent.KEYCODE_DPAD_CENTER || k == KeyEvent.KEYCODE_ENTER ||
+                          k == KeyEvent.KEYCODE_BACK
+                      if (ours) {
+                          if (e.action == KeyEvent.ACTION_DOWN) {
+                              val rows = prefs.rows
+                              when (k) {
+                                  KeyEvent.KEYCODE_DPAD_LEFT -> moveBy(-rows)
+                                  KeyEvent.KEYCODE_DPAD_RIGHT -> moveBy(rows)
+                                  KeyEvent.KEYCODE_DPAD_UP -> if (rows > 1) moveBy(-1)
+                                  KeyEvent.KEYCODE_DPAD_DOWN -> if (rows > 1) moveBy(1)
+                                  else -> endMove()
+                              }
+                          }
+                          return true
+                      }
+                  }
+                  if (k == KeyEvent.KEYCODE_BACK) return true // this is the home screen
+                  if (k == KeyEvent.KEYCODE_MENU) {
+                      if (e.action == KeyEvent.ACTION_UP) showSettings()
+                      return true
+                  }
+                  return super.dispatchKeyEvent(e)
+              }
+
+              // ---------------------------------------------------------------- settings
+
+              private fun showSettings() {
+                  val items = arrayOf(
+                      "Weather location: " + prefs.city,
+                      "Temperature: " + (if (prefs.fahrenheit) "°F" else "°C"),
+                      "Tile size: " + sizeNames[prefs.tileSize.coerceIn(0, 2)],
+                      "Rows: " + prefs.rows,
+                      "Background: " + bgNames[prefs.bg.coerceIn(0, bgNames.size - 1)],
+                      "Clock: " + (if (prefs.clock24) "24-hour" else "12-hour"),
+                      "Hidden apps (" + prefs.hidden.count { allApps.containsKey(it) } + ")",
+                      "System settings (Wi-Fi, etc.)"
+                  )
+                  AlertDialog.Builder(this, dlgTheme)
+                      .setTitle("Customize")
+                      .setItems(items) { _, w ->
+                          when (w) {
+                              0 -> askCity()
+                              1 -> { prefs.fahrenheit = !prefs.fahrenheit; refreshWeather(true); showSettings() }
+                              2 -> { prefs.tileSize = (prefs.tileSize + 1) % 3; applyLayoutPrefs(); showSettings() }
+                              3 -> { prefs.rows = if (prefs.rows == 1) 2 else 1; applyLayoutPrefs(); showSettings() }
+                              4 -> { prefs.bg = (prefs.bg + 1) % bgNames.size; applyBackground(); showSettings() }
+                              5 -> { prefs.clock24 = !prefs.clock24; applyClock(); showSettings() }
+                              6 -> showHidden()
+                              7 -> try { startActivity(Intent(Settings.ACTION_SETTINGS)) } catch (e: Exception) { }
+                          }
+                      }
+                      .show()
+              }
+
+              private fun showHidden() {
+                  val hid = allApps.values.filter { it.pkg in prefs.hidden }
+                  if (hid.isEmpty()) {
+                      Toast.makeText(this, "No hidden apps", Toast.LENGTH_SHORT).show()
+                      showSettings()
+                      return
+                  }
+                  val checked = BooleanArray(hid.size) { true }
+                  AlertDialog.Builder(this, dlgTheme)
+                      .setTitle("Checked = hidden. Uncheck to show.")
+                      .setMultiChoiceItems(hid.map { it.defLabel }.toTypedArray(), checked) { _, w, on -> checked[w] = on }
+                      .setPositiveButton("Save") { _, _ ->
+                          val h = prefs.hidden.toMutableSet()
+                          hid.forEachIndexed { i, a -> if (!checked[i]) h.remove(a.pkg) }
+                          prefs.hidden = h
+                          rebuildList(-1)
+                          showSettings()
+                      }
+                      .setNegativeButton("Cancel") { _, _ -> showSettings() }
+                      .show()
+              }
+
+              private fun askCity() {
+                  val input = EditText(this)
+                  input.setSingleLine(true)
+                  input.hint = "City name"
+                  AlertDialog.Builder(this, dlgTheme)
+                      .setTitle("Search city")
+                      .setView(input)
+                      .setPositiveButton("Search") { _, _ ->
+                          val q = input.text.toString().trim()
+                          if (q.isEmpty()) showSettings() else searchCity(q)
+                      }
+                      .setNegativeButton("Cancel") { _, _ -> showSettings() }
+                      .show()
+              }
+
+              private fun searchCity(q: String) {
+                  io.execute {
+                      val res = Weather.geocode(q)
+                      ui.post {
+                          if (res.isEmpty()) {
+                              Toast.makeText(this, "No matches (check Wi-Fi?)", Toast.LENGTH_LONG).show()
+                              askCity()
+                          } else {
+                              AlertDialog.Builder(this, dlgTheme)
+                                  .setTitle("Pick a location")
+                                  .setItems(res.map { it.label }.toTypedArray()) { _, w ->
+                                      prefs.city = res[w].label
+                                      prefs.lat = res[w].lat
+                                      prefs.lon = res[w].lon
+                                      refreshWeather(true)
+                                      showSettings()
+                                  }
+                                  .show()
+                          }
+                      }
+                  }
+              }
+
+              // ---------------------------------------------------------------- weather
+
+              private fun metaNow() = "" + prefs.lat + "," + prefs.lon + "," + prefs.fahrenheit
+
+              private fun showCachedWeather() {
+                  val raw = prefs.cache
+                  if (raw != null && prefs.cacheMeta == metaNow()) {
+                      Weather.parse(raw)?.let { showWeather(it) }
+                  }
+              }
+
+              private fun refreshWeather(force: Boolean) {
+                  if (!force && System.currentTimeMillis() - lastWx < 15 * 60 * 1000) return
+                  val lat = prefs.lat
+                  val lon = prefs.lon
+                  val f = prefs.fahrenheit
+                  val meta = metaNow()
+                  io.execute {
+                      val raw = Weather.fetchRaw(lat, lon, f)
+                      val wx = if (raw != null) Weather.parse(raw) else null
+                      ui.post {
+                          if (wx != null) {
+                              prefs.cache = raw
+                              prefs.cacheMeta = meta
+                              lastWx = System.currentTimeMillis()
+                              showWeather(wx)
+                          } else if (tvTemp.text.toString() == "…") {
+                              tvDesc.text = "Weather unavailable. Check your Wi-Fi."
+                          }
+                      }
+                  }
+              }
+
+              private fun showWeather(wx: Weather.Wx) {
+                  val d = Weather.describe(wx.code)
+                  tvTemp.text = d.first + "  " + wx.temp + "°"
+                  tvDesc.text = d.second + "  ·  H " + wx.hi + "°  L " + wx.lo + "°  ·  " + prefs.city
+                  forecast.removeAllViews()
+                  for (day in wx.days.drop(1)) {
+                      val t = TextView(this)
+                      t.gravity = Gravity.CENTER
+                      t.setTextColor(0xCCFFFFFF.toInt())
+                      t.textSize = 15f
+                      t.text = day.name + "\n" + Weather.describe(day.code).first + "\n" + day.hi + "° / " + day.lo + "°"
+                      t.setPadding(0, 0, dp(28), 0)
+                      forecast.addView(t)
+                  }
+              }
+          }
+          TVHOME_EOF
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: 8.9
+      - name: Build
+        run: gradle assembleDebug --no-daemon
+      - name: Rename APK
+        run: cp app/build/outputs/apk/debug/app-debug.apk TVHome.apk
+      - name: Move latest tag
+        run: |
+          git config user.name "github-actions"
+          git config user.email "actions@github.com"
+          git tag -f latest
+          git push -f origin latest
+      - name: Publish release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: latest
+          name: TV Home (latest)
+          files: TVHome.apk
