@@ -78,6 +78,7 @@ jobs:
               <uses-feature android:name="android.software.leanback" android:required="false" />
               <uses-feature android:name="android.hardware.touchscreen" android:required="false" />
               <uses-permission android:name="android.permission.INTERNET" />
+              <uses-permission android:name="android.permission.PACKAGE_USAGE_STATS" />
 
               <queries>
                   <intent>
@@ -148,6 +149,7 @@ jobs:
           cat > app/src/main/java/com/bridgeville/tvhome/Models.kt <<'TVHOME_EOF'
           package com.bridgeville.tvhome
 
+          import android.graphics.Bitmap
           import android.graphics.drawable.Drawable
 
           data class AppItem(
@@ -155,7 +157,8 @@ jobs:
               val defLabel: String,
               val art: Drawable?,
               val isIcon: Boolean,
-              val special: Boolean = false
+              val special: Boolean = false,
+              val ambient: Bitmap? = null
           )
           TVHOME_EOF
           mkdir -p app/src/main/java/com/bridgeville/tvhome
@@ -213,6 +216,13 @@ jobs:
               var cacheMeta: String?
                   get() = sp.getString("wxmeta", null)
                   set(v) { sp.edit().putString("wxmeta", v).apply() }
+
+              var sortMode: Int
+                  get() = sp.getInt("sort", 0)
+                  set(v) { sp.edit().putInt("sort", v).apply() }
+
+              fun lastLaunch(pkg: String): Long = sp.getLong("lu_$pkg", 0L)
+              fun setLastLaunch(pkg: String, t: Long) { sp.edit().putLong("lu_$pkg", t).apply() }
           }
           TVHOME_EOF
           mkdir -p app/src/main/java/com/bridgeville/tvhome
@@ -315,6 +325,7 @@ jobs:
           cat > app/src/main/java/com/bridgeville/tvhome/AppAdapter.kt <<'TVHOME_EOF'
           package com.bridgeville.tvhome
 
+          import android.animation.ObjectAnimator
           import android.graphics.Color
           import android.graphics.Outline
           import android.graphics.drawable.GradientDrawable
@@ -323,6 +334,7 @@ jobs:
           import android.view.View
           import android.view.ViewGroup
           import android.view.ViewOutlineProvider
+          import android.view.animation.PathInterpolator
           import android.widget.FrameLayout
           import android.widget.ImageView
           import android.widget.LinearLayout
@@ -333,6 +345,7 @@ jobs:
               var items: MutableList<AppItem> = mutableListOf()
               var tileW = 220
               var movingPkg: String? = null
+              private val ease = PathInterpolator(0.2f, 0f, 0f, 1f)
 
               class VH(
                   val root: LinearLayout,
@@ -346,7 +359,7 @@ jobs:
               override fun onCreateViewHolder(parent: ViewGroup, viewType: Int): VH {
                   val c = parent.context
                   val d = c.resources.displayMetrics.density
-                  val radius = 14 * d
+                  val radius = 18 * d
                   val ring = GradientDrawable()
                   ring.setColor(Color.TRANSPARENT)
                   ring.setStroke((3 * d).toInt(), Color.WHITE)
@@ -381,12 +394,12 @@ jobs:
 
                   val label = TextView(c)
                   label.setTextColor(Color.WHITE)
-                  label.textSize = 16f
+                  label.textSize = 14f
                   label.gravity = Gravity.CENTER
                   label.maxLines = 1
                   label.ellipsize = TextUtils.TruncateAt.END
                   label.alpha = 0f
-                  label.setPadding(0, (14 * d).toInt(), 0, 0)
+                  label.setPadding(0, (16 * d).toInt(), 0, 0)
 
                   val root = LinearLayout(c)
                   root.orientation = LinearLayout.VERTICAL
@@ -398,7 +411,7 @@ jobs:
                   root.addView(label, LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT))
 
                   val vh = VH(root, card, img, glyph, label, ring)
-                  card.setOnFocusChangeListener { _, has -> applyFocus(vh, has) }
+                  card.setOnFocusChangeListener { _, has -> applyFocus(vh, has, true) }
                   card.setOnClickListener {
                       val p = vh.bindingAdapterPosition
                       if (p >= 0) act.onTileClick(items[p])
@@ -434,7 +447,7 @@ jobs:
                           h.img.setPadding(0, 0, 0, 0)
                       }
                   }
-                  applyFocus(h, h.card.hasFocus())
+                  applyFocus(h, h.card.hasFocus(), false)
               }
 
               override fun getItemCount() = items.size
@@ -444,14 +457,31 @@ jobs:
                   return p >= 0 && p < items.size && movingPkg != null && items[p].pkg == movingPkg
               }
 
-              private fun applyFocus(h: VH, has: Boolean) {
+              private fun applyFocus(h: VH, has: Boolean, animate: Boolean) {
                   val d = h.root.resources.displayMetrics.density
                   val moving = isMoving(h)
-                  val s = if (!has) 1f else if (moving) 1.22f else 1.14f
-                  h.card.animate().scaleX(s).scaleY(s).translationZ(if (has) 24 * d else 0f).setDuration(130).start()
+                  val s = if (!has) 1f else if (moving) 1.22f else 1.16f
+                  val z = if (has) 28 * d else 0f
+                  val la = if (has) 1f else 0f
+                  val ra = if (has) 255 else 0
                   h.ring.setStroke((3 * d).toInt(), if (moving) 0xFFFFC107.toInt() else Color.WHITE)
-                  h.ring.setAlpha(if (has) 255 else 0)
-                  h.label.animate().alpha(if (has) 1f else 0f).setDuration(130).start()
+                  if (animate) {
+                      h.card.animate().scaleX(s).scaleY(s).translationZ(z).setDuration(220).setInterpolator(ease).start()
+                      h.label.animate().alpha(la).setDuration(220).start()
+                      ObjectAnimator.ofInt(h.ring, "alpha", if (has) 0 else 255, ra).setDuration(200).start()
+                  } else {
+                      h.card.animate().cancel()
+                      h.card.scaleX = s
+                      h.card.scaleY = s
+                      h.card.translationZ = z
+                      h.label.animate().cancel()
+                      h.label.alpha = la
+                      h.ring.setAlpha(ra)
+                  }
+                  if (has) {
+                      val p = h.bindingAdapterPosition
+                      if (p >= 0 && p < items.size) act.onTileFocused(items[p])
+                  }
               }
           }
           TVHOME_EOF
@@ -461,25 +491,38 @@ jobs:
 
           import android.app.Activity
           import android.app.AlertDialog
+          import android.app.AppOpsManager
+          import android.app.usage.UsageStatsManager
           import android.content.BroadcastReceiver
           import android.content.Context
           import android.content.Intent
           import android.content.IntentFilter
+          import android.graphics.Bitmap
+          import android.graphics.Canvas
           import android.graphics.Color
+          import android.graphics.LinearGradient
+          import android.graphics.Paint
+          import android.graphics.Rect
+          import android.graphics.Shader
           import android.graphics.Typeface
           import android.graphics.drawable.Drawable
           import android.graphics.drawable.GradientDrawable
           import android.net.Uri
+          import android.os.Build
           import android.os.Bundle
           import android.os.Handler
           import android.os.Looper
           import android.provider.Settings
+          import android.text.TextUtils
           import android.view.Gravity
           import android.view.KeyEvent
           import android.view.View
           import android.view.ViewGroup
+          import android.view.animation.DecelerateInterpolator
+          import android.view.animation.PathInterpolator
           import android.widget.EditText
           import android.widget.FrameLayout
+          import android.widget.ImageView
           import android.widget.LinearLayout
           import android.widget.TextClock
           import android.widget.TextView
@@ -495,29 +538,63 @@ jobs:
               private lateinit var adapter: AppAdapter
               private lateinit var rv: RecyclerView
               private lateinit var root: FrameLayout
+              private lateinit var content: LinearLayout
+              private lateinit var ambA: ImageView
+              private lateinit var ambB: ImageView
               private lateinit var tvTemp: TextView
               private lateinit var tvDesc: TextView
               private lateinit var forecast: LinearLayout
               private lateinit var clock: TextClock
+              private lateinit var ampm: TextClock
               private lateinit var date: TextClock
+              private lateinit var heroTitle: TextView
+              private lateinit var heroSub: TextView
+              private lateinit var rowLabel: TextView
               private lateinit var hint: TextView
 
               private val io = Executors.newSingleThreadExecutor()
               private val ui = Handler(Looper.getMainLooper())
               private var allApps: Map<String, AppItem> = emptyMap()
+              private var lastUsed: Map<String, Long> = emptyMap()
               private var lastWx = 0L
+              private var ambFront = false
+              private var heroPkg: String? = null
+              private var pendingHero: AppItem? = null
 
+              private val ease = PathInterpolator(0.2f, 0f, 0f, 1f)
               private val dlgTheme = android.R.style.Theme_DeviceDefault_Dialog_Alert
               private val sizes = intArrayOf(170, 220, 280)
               private val sizeNames = arrayOf("Small", "Medium", "Large")
               private val bgNames = arrayOf("Midnight", "Aurora", "Sunset", "Graphite", "Black")
 
+              private val heroRun = Runnable { applyHero() }
               private val reload = Runnable { loadApps(false) }
               private val pkgReceiver = object : BroadcastReceiver() {
                   override fun onReceive(c: Context?, i: Intent?) {
                       ui.removeCallbacks(reload)
                       ui.postDelayed(reload, 800)
                   }
+              }
+
+              // Keeps the focused card centered and scrolls smoothly.
+              private class CenterGrid(ctx: Context, rows: Int) :
+                  GridLayoutManager(ctx, rows, GridLayoutManager.HORIZONTAL, false) {
+
+                  private fun center(parent: RecyclerView, child: View, immediate: Boolean): Boolean {
+                      val dx = (child.left + child.width / 2) - (parent.width / 2)
+                      if (Math.abs(dx) < 2) return false
+                      if (immediate) parent.scrollBy(dx, 0)
+                      else parent.smoothScrollBy(dx, 0, DecelerateInterpolator(1.6f), 320)
+                      return true
+                  }
+
+                  override fun requestChildRectangleOnScreen(
+                      parent: RecyclerView, child: View, rect: Rect, immediate: Boolean
+                  ): Boolean = center(parent, child, immediate)
+
+                  override fun requestChildRectangleOnScreen(
+                      parent: RecyclerView, child: View, rect: Rect, immediate: Boolean, focusedChildVisible: Boolean
+                  ): Boolean = center(parent, child, immediate)
               }
 
               private fun dp(v: Int) = (v * resources.displayMetrics.density).toInt()
@@ -531,6 +608,7 @@ jobs:
                   applyBackground()
                   applyClock()
                   applyLayoutPrefs()
+                  updateRowLabel()
                   showCachedWeather()
                   loadApps(true)
                   refreshWeather(true)
@@ -540,11 +618,17 @@ jobs:
                   f.addAction(Intent.ACTION_PACKAGE_REPLACED)
                   f.addDataScheme("package")
                   registerReceiver(pkgReceiver, f)
+
+                  content.alpha = 0f
+                  content.animate().alpha(1f).setDuration(500).start()
+                  rv.translationY = dp(50).toFloat()
+                  rv.animate().translationY(0f).setDuration(650).setInterpolator(ease).start()
               }
 
               override fun onResume() {
                   super.onResume()
                   refreshWeather(false)
+                  refreshUsage()
               }
 
               override fun onNewIntent(intent: Intent?) {
@@ -564,55 +648,128 @@ jobs:
 
               private fun light(v: TextView) { v.typeface = Typeface.create("sans-serif-light", Typeface.NORMAL) }
 
+              private fun glass(radiusDp: Int): GradientDrawable {
+                  val g = GradientDrawable()
+                  g.setColor(0x26FFFFFF)
+                  g.cornerRadius = dp(radiusDp).toFloat()
+                  g.setStroke(dp(1), 0x33FFFFFF)
+                  return g
+              }
+
               private fun buildUi() {
+                  val MATCH = ViewGroup.LayoutParams.MATCH_PARENT
+                  val WRAP = ViewGroup.LayoutParams.WRAP_CONTENT
+
                   root = FrameLayout(this)
                   root.clipChildren = false
 
-                  val content = LinearLayout(this)
+                  // ambient glow of the focused app (crossfades between two layers)
+                  ambA = ImageView(this)
+                  ambB = ImageView(this)
+                  for (v in arrayOf(ambA, ambB)) {
+                      v.scaleType = ImageView.ScaleType.CENTER_CROP
+                      v.alpha = 0f
+                      root.addView(v, FrameLayout.LayoutParams(MATCH, MATCH))
+                  }
+                  val scrim = View(this)
+                  scrim.background = GradientDrawable(
+                      GradientDrawable.Orientation.TOP_BOTTOM,
+                      intArrayOf(0x66000000, 0x00000000, 0x00000000, 0xCC000000.toInt())
+                  )
+                  root.addView(scrim, FrameLayout.LayoutParams(MATCH, MATCH))
+
+                  content = LinearLayout(this)
                   content.orientation = LinearLayout.VERTICAL
                   content.clipChildren = false
-                  content.setPadding(dp(56), dp(36), dp(56), dp(16))
+                  content.setPadding(0, dp(30), 0, dp(10))
 
+                  // header: weather panel (left), clock (right)
                   val header = LinearLayout(this)
                   header.orientation = LinearLayout.HORIZONTAL
+                  header.gravity = Gravity.CENTER_VERTICAL
+                  header.setPadding(dp(56), 0, dp(56), 0)
 
-                  val left = LinearLayout(this)
-                  left.orientation = LinearLayout.VERTICAL
+                  val panel = LinearLayout(this)
+                  panel.orientation = LinearLayout.HORIZONTAL
+                  panel.gravity = Gravity.CENTER_VERTICAL
+                  panel.background = glass(22)
+                  panel.setPadding(dp(22), dp(12), dp(22), dp(12))
+                  val tcol = LinearLayout(this)
+                  tcol.orientation = LinearLayout.VERTICAL
                   tvTemp = TextView(this)
                   tvTemp.setTextColor(Color.WHITE)
-                  tvTemp.textSize = 54f
+                  tvTemp.textSize = 38f
                   tvTemp.text = "…"
                   light(tvTemp)
                   tvDesc = TextView(this)
                   tvDesc.setTextColor(0xCCFFFFFF.toInt())
-                  tvDesc.textSize = 18f
+                  tvDesc.textSize = 14f
+                  tcol.addView(tvTemp)
+                  tcol.addView(tvDesc)
                   forecast = LinearLayout(this)
                   forecast.orientation = LinearLayout.HORIZONTAL
-                  forecast.setPadding(0, dp(14), 0, 0)
-                  left.addView(tvTemp)
-                  left.addView(tvDesc)
-                  left.addView(forecast)
+                  forecast.gravity = Gravity.CENTER_VERTICAL
+                  forecast.setPadding(dp(14), 0, 0, 0)
+                  panel.addView(tcol)
+                  panel.addView(forecast)
+                  header.addView(panel, LinearLayout.LayoutParams(WRAP, WRAP))
+                  header.addView(View(this), LinearLayout.LayoutParams(0, 1, 1f))
 
-                  val right = LinearLayout(this)
-                  right.orientation = LinearLayout.VERTICAL
-                  right.gravity = Gravity.END
+                  val cbox = LinearLayout(this)
+                  cbox.orientation = LinearLayout.VERTICAL
+                  cbox.gravity = Gravity.END
+                  val trow = LinearLayout(this)
+                  trow.orientation = LinearLayout.HORIZONTAL
+                  trow.gravity = Gravity.BOTTOM
                   clock = TextClock(this)
-                  clock.textSize = 64f
+                  clock.textSize = 56f
                   clock.setTextColor(Color.WHITE)
                   light(clock)
+                  ampm = TextClock(this)
+                  ampm.textSize = 20f
+                  ampm.setTextColor(0xB3FFFFFF.toInt())
+                  ampm.setPadding(dp(6), 0, 0, dp(10))
+                  ampm.format12Hour = "a"
+                  ampm.format24Hour = "a"
+                  trow.addView(clock)
+                  trow.addView(ampm)
                   date = TextClock(this)
-                  date.textSize = 20f
+                  date.textSize = 18f
                   date.setTextColor(0xCCFFFFFF.toInt())
                   date.format12Hour = "EEEE, MMMM d"
                   date.format24Hour = "EEEE, MMMM d"
                   date.gravity = Gravity.END
-                  right.addView(clock)
-                  right.addView(date)
+                  cbox.addView(trow)
+                  cbox.addView(date)
+                  header.addView(cbox, LinearLayout.LayoutParams(WRAP, WRAP))
+                  content.addView(header, LinearLayout.LayoutParams(MATCH, WRAP))
 
-                  header.addView(left, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
-                  header.addView(right, LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT))
-                  content.addView(header, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT))
-                  content.addView(View(this), LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f))
+                  // hero: big name of the focused app
+                  val hero = LinearLayout(this)
+                  hero.orientation = LinearLayout.VERTICAL
+                  hero.gravity = Gravity.BOTTOM
+                  hero.setPadding(dp(56), 0, dp(56), dp(14))
+                  heroTitle = TextView(this)
+                  heroTitle.setTextColor(Color.WHITE)
+                  heroTitle.textSize = 40f
+                  heroTitle.typeface = Typeface.create("sans-serif-medium", Typeface.NORMAL)
+                  heroTitle.maxLines = 1
+                  heroTitle.ellipsize = TextUtils.TruncateAt.END
+                  heroTitle.setShadowLayer(10f, 0f, 2f, 0x80000000.toInt())
+                  heroSub = TextView(this)
+                  heroSub.setTextColor(0xCCFFFFFF.toInt())
+                  heroSub.textSize = 17f
+                  hero.addView(heroTitle)
+                  hero.addView(heroSub)
+                  content.addView(hero, LinearLayout.LayoutParams(MATCH, 0, 1f))
+
+                  rowLabel = TextView(this)
+                  rowLabel.setTextColor(0x99FFFFFF.toInt())
+                  rowLabel.textSize = 12f
+                  rowLabel.typeface = Typeface.DEFAULT_BOLD
+                  rowLabel.letterSpacing = 0.15f
+                  rowLabel.setPadding(dp(56), 0, 0, 0)
+                  content.addView(rowLabel, LinearLayout.LayoutParams(WRAP, WRAP))
 
                   adapter = AppAdapter(this)
                   rv = RecyclerView(this)
@@ -620,18 +777,18 @@ jobs:
                   rv.clipToPadding = false
                   rv.clipChildren = false
                   rv.overScrollMode = View.OVER_SCROLL_NEVER
-                  rv.setPadding(dp(44), dp(24), dp(44), dp(20))
+                  rv.setPadding(dp(44), dp(4), dp(44), dp(18))
                   (rv.itemAnimator as? SimpleItemAnimator)?.supportsChangeAnimations = false
-                  content.addView(rv, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT))
+                  content.addView(rv, LinearLayout.LayoutParams(MATCH, WRAP))
 
                   hint = TextView(this)
                   hint.setTextColor(0xFFFFC107.toInt())
                   hint.textSize = 16f
                   hint.gravity = Gravity.CENTER
                   hint.visibility = View.GONE
-                  content.addView(hint, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT))
+                  content.addView(hint, LinearLayout.LayoutParams(MATCH, WRAP))
 
-                  root.addView(content, FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT))
+                  root.addView(content, FrameLayout.LayoutParams(MATCH, MATCH))
                   setContentView(root)
               }
 
@@ -647,19 +804,189 @@ jobs:
               }
 
               private fun applyClock() {
-                  val f = if (prefs.clock24) "HH:mm" else "h:mm a"
+                  val f = if (prefs.clock24) "HH:mm" else "h:mm"
                   clock.format12Hour = f
                   clock.format24Hour = f
+                  ampm.visibility = if (prefs.clock24) View.GONE else View.VISIBLE
               }
 
               private fun applyLayoutPrefs() {
                   adapter.tileW = sizes[prefs.tileSize.coerceIn(0, 2)]
-                  rv.layoutManager = GridLayoutManager(this, prefs.rows.coerceIn(1, 2), GridLayoutManager.HORIZONTAL, false)
+                  rv.layoutManager = CenterGrid(this, prefs.rows.coerceIn(1, 2))
                   adapter.notifyDataSetChanged()
+              }
+
+              private fun updateRowLabel() {
+                  rowLabel.text = if (prefs.sortMode == 0) "RECENTLY USED" else "MY APPS"
               }
 
               fun labelFor(item: AppItem): String =
                   if (item.special) "Customize" else (prefs.label(item.pkg) ?: item.defLabel)
+
+              // ---------------------------------------------------------------- hero + ambient
+
+              fun onTileFocused(item: AppItem) {
+                  if (item.pkg == heroPkg) return
+                  pendingHero = item
+                  ui.removeCallbacks(heroRun)
+                  ui.postDelayed(heroRun, 90)
+              }
+
+              private fun ago(t: Long): String {
+                  val m = (System.currentTimeMillis() - t) / 60000
+                  return when {
+                      m < 1 -> "just now"
+                      m < 60 -> m.toString() + " min ago"
+                      m < 1440 -> (m / 60).toString() + " h ago"
+                      m < 2880 -> "yesterday"
+                      else -> (m / 1440).toString() + " days ago"
+                  }
+              }
+
+              private fun applyHero() {
+                  val item = pendingHero ?: return
+                  heroPkg = item.pkg
+                  setAmbient(item.ambient)
+                  if (item.special) {
+                      heroTitle.text = "Customize"
+                      heroSub.text = "Weather, layout, theme and more"
+                  } else {
+                      heroTitle.text = labelFor(item)
+                      val lu = lastUsed[item.pkg] ?: 0L
+                      heroSub.text = if (lu > 0L) "Opened " + ago(lu) else "Not opened recently"
+                  }
+                  for (v in arrayOf(heroTitle, heroSub)) {
+                      v.alpha = 0f
+                      v.translationY = dp(8).toFloat()
+                      v.animate().alpha(1f).translationY(0f).setDuration(240).setInterpolator(ease).start()
+                  }
+              }
+
+              private fun setAmbient(b: Bitmap?) {
+                  val show = if (ambFront) ambA else ambB
+                  val hide = if (ambFront) ambB else ambA
+                  ambFront = !ambFront
+                  show.setImageBitmap(b)
+                  show.animate().alpha(if (b != null) 0.5f else 0f).setDuration(500).start()
+                  hide.animate().alpha(0f).setDuration(500).start()
+              }
+
+              private fun darken(c: Int): Int =
+                  Color.rgb((Color.red(c) * 0.45f).toInt(), (Color.green(c) * 0.45f).toInt(), (Color.blue(c) * 0.45f).toInt())
+
+              // Tiny bitmap that gets upscaled (smoothly) into a soft colored glow.
+              private fun makeAmbient(src: Drawable, isIcon: Boolean): Bitmap? {
+                  return try {
+                      val d = src.constantState?.newDrawable()?.mutate() ?: src
+                      val w = 64
+                      val h = 36
+                      val out = Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888)
+                      val c = Canvas(out)
+                      if (!isIcon) {
+                          d.setBounds(0, 0, w, h)
+                          d.draw(c)
+                      } else {
+                          val s = 24
+                          val small = Bitmap.createBitmap(s, s, Bitmap.Config.ARGB_8888)
+                          d.setBounds(0, 0, s, s)
+                          d.draw(Canvas(small))
+                          var r = 0f
+                          var g = 0f
+                          var b = 0f
+                          var tw = 0f
+                          val hsv = FloatArray(3)
+                          for (y in 0 until s) {
+                              for (x in 0 until s) {
+                                  val p = small.getPixel(x, y)
+                                  val a = Color.alpha(p) / 255f
+                                  if (a < 0.3f) continue
+                                  Color.colorToHSV(p, hsv)
+                                  val wt = a * (0.15f + hsv[1]) * (0.2f + hsv[2])
+                                  r += Color.red(p) * wt
+                                  g += Color.green(p) * wt
+                                  b += Color.blue(p) * wt
+                                  tw += wt
+                              }
+                          }
+                          if (tw <= 0f) return null
+                          val col = Color.rgb((r / tw).toInt(), (g / tw).toInt(), (b / tw).toInt())
+                          val paint = Paint()
+                          paint.shader = LinearGradient(0f, 0f, w.toFloat(), h.toFloat(), col, darken(col), Shader.TileMode.CLAMP)
+                          c.drawRect(0f, 0f, w.toFloat(), h.toFloat(), paint)
+                      }
+                      out
+                  } catch (e: Exception) {
+                      null
+                  }
+              }
+
+              // ---------------------------------------------------------------- usage / ordering
+
+              private fun hasUsageAccess(): Boolean = try {
+                  val ops = getSystemService(Context.APP_OPS_SERVICE) as AppOpsManager
+                  ops.checkOpNoThrow(AppOpsManager.OPSTR_GET_USAGE_STATS, android.os.Process.myUid(), packageName) ==
+                      AppOpsManager.MODE_ALLOWED
+              } catch (e: Exception) {
+                  false
+              }
+
+              private fun computeLastUsed(pkgs: Collection<String>): Map<String, Long> {
+                  val m = HashMap<String, Long>()
+                  if (hasUsageAccess()) {
+                      try {
+                          val usm = getSystemService(Context.USAGE_STATS_SERVICE) as UsageStatsManager
+                          val now = System.currentTimeMillis()
+                          val list = usm.queryUsageStats(UsageStatsManager.INTERVAL_BEST, now - 30L * 24 * 3600 * 1000, now)
+                          if (list != null) {
+                              for (u in list) {
+                                  var t = u.lastTimeUsed
+                                  if (Build.VERSION.SDK_INT >= 29 && u.lastTimeVisible > 0L) t = u.lastTimeVisible
+                                  if (t > (m[u.packageName] ?: 0L)) m[u.packageName] = t
+                              }
+                          }
+                      } catch (e: Exception) { }
+                  }
+                  for (p in pkgs) {
+                      val l = prefs.lastLaunch(p)
+                      if (l > (m[p] ?: 0L)) m[p] = l
+                  }
+                  return m
+              }
+
+              private fun computeOrdered(): List<AppItem> {
+                  val hidden = prefs.hidden
+                  val vis = allApps.filterKeys { it !in hidden }
+                  return if (prefs.sortMode == 0) {
+                      vis.values.sortedWith(
+                          compareByDescending<AppItem> { lastUsed[it.pkg] ?: 0L }.thenBy { it.defLabel.lowercase() }
+                      )
+                  } else {
+                      val saved = prefs.order
+                      saved.mapNotNull { vis[it] } +
+                          vis.values.filter { it.pkg !in saved }.sortedBy { it.defLabel.lowercase() }
+                  }
+              }
+
+              private fun refreshUsage() {
+                  if (allApps.isEmpty()) return
+                  val keys = allApps.keys.toList()
+                  io.execute {
+                      val lu = computeLastUsed(keys)
+                      ui.post {
+                          lastUsed = lu
+                          if (prefs.sortMode == 0 && adapter.movingPkg == null) {
+                              val cur = adapter.items.filter { !it.special }.map { it.pkg }
+                              val nw = computeOrdered().map { it.pkg }
+                              if (cur != nw) rebuildList(0)
+                          }
+                      }
+                  }
+              }
+
+              private fun seedManualOrder() {
+                  val vis = adapter.items.filter { !it.special }.map { it.pkg }
+                  prefs.order = vis + prefs.order.filter { it !in vis }
+              }
 
               // ---------------------------------------------------------------- apps
 
@@ -675,24 +1002,23 @@ jobs:
                               var banner: Drawable? = null
                               try { banner = ri.activityInfo.loadBanner(pm) } catch (e: Exception) { }
                               val art = banner ?: ri.loadIcon(pm)
-                              seen[p] = AppItem(p, ri.loadLabel(pm).toString(), art, banner == null)
+                              val amb = makeAmbient(art, banner == null)
+                              seen[p] = AppItem(p, ri.loadLabel(pm).toString(), art, banner == null, false, amb)
                           }
                       }
+                      val lu = computeLastUsed(seen.keys)
                       ui.post {
                           allApps = seen
+                          lastUsed = lu
                           rebuildList(if (initial) 0 else -1)
                       }
                   }
               }
 
               private fun rebuildList(focus: Int) {
-                  val hidden = prefs.hidden
-                  val saved = prefs.order
-                  val vis = allApps.filterKeys { it !in hidden }
-                  val ordered = saved.mapNotNull { vis[it] } +
-                      vis.values.filter { it.pkg !in saved }.sortedBy { it.defLabel.lowercase() }
-                  val list = ordered.toMutableList()
+                  val list = computeOrdered().toMutableList()
                   list.add(AppItem("__settings", "Customize", null, false, true))
+                  heroPkg = null
                   adapter.items = list
                   adapter.notifyDataSetChanged()
                   if (focus >= 0) rv.postDelayed({ focusAt(focus) }, 80)
@@ -712,7 +1038,11 @@ jobs:
                       Toast.makeText(this, "Can't open that app", Toast.LENGTH_SHORT).show()
                       return
                   }
-                  try { startActivity(i) } catch (e: Exception) {
+                  prefs.setLastLaunch(item.pkg, System.currentTimeMillis())
+                  try {
+                      startActivity(i)
+                      overridePendingTransition(android.R.anim.fade_in, android.R.anim.fade_out)
+                  } catch (e: Exception) {
                       Toast.makeText(this, "Can't open that app", Toast.LENGTH_SHORT).show()
                   }
               }
@@ -737,7 +1067,7 @@ jobs:
                               } catch (e: Exception) { }
                           }
                       }
-                      .show()
+                      .showStyled()
               }
 
               private fun askRename(item: AppItem) {
@@ -749,19 +1079,37 @@ jobs:
                       .setView(input)
                       .setPositiveButton("Save") { _, _ ->
                           prefs.setLabel(item.pkg, input.text.toString())
+                          heroPkg = null
                           adapter.notifyDataSetChanged()
                       }
                       .setNeutralButton("Reset") { _, _ ->
                           prefs.setLabel(item.pkg, null)
+                          heroPkg = null
                           adapter.notifyDataSetChanged()
                       }
                       .setNegativeButton("Cancel", null)
-                      .show()
+                      .showStyled()
+              }
+
+              private fun AlertDialog.Builder.showStyled(): AlertDialog {
+                  val d = create()
+                  val bg = GradientDrawable()
+                  bg.setColor(0xF0171A21.toInt())
+                  bg.cornerRadius = dp(18).toFloat()
+                  d.window?.setBackgroundDrawable(bg)
+                  d.show()
+                  return d
               }
 
               // ---------------------------------------------------------------- moving
 
               private fun startMove(item: AppItem) {
+                  if (prefs.sortMode == 0) {
+                      seedManualOrder()
+                      prefs.sortMode = 1
+                      updateRowLabel()
+                      Toast.makeText(this, "Switched to My order. Change it in Customize.", Toast.LENGTH_LONG).show()
+                  }
                   adapter.movingPkg = item.pkg
                   hint.text = "Use the arrow keys to move this app  ·  press OK to drop"
                   hint.visibility = View.VISIBLE
@@ -788,8 +1136,7 @@ jobs:
                   val p = adapter.items.indexOfFirst { it.pkg == mp }
                   adapter.movingPkg = null
                   hint.visibility = View.GONE
-                  val vis = adapter.items.filter { !it.special }.map { it.pkg }
-                  prefs.order = vis + prefs.order.filter { it !in vis }
+                  seedManualOrder()
                   if (p >= 0) { adapter.notifyItemChanged(p); refocus(p) }
               }
 
@@ -832,10 +1179,12 @@ jobs:
                   val items = arrayOf(
                       "Weather location: " + prefs.city,
                       "Temperature: " + (if (prefs.fahrenheit) "°F" else "°C"),
+                      "Sort: " + (if (prefs.sortMode == 0) "Recently used" else "My order"),
                       "Tile size: " + sizeNames[prefs.tileSize.coerceIn(0, 2)],
                       "Rows: " + prefs.rows,
-                      "Background: " + bgNames[prefs.bg.coerceIn(0, bgNames.size - 1)],
+                      "Theme: " + bgNames[prefs.bg.coerceIn(0, bgNames.size - 1)],
                       "Clock: " + (if (prefs.clock24) "24-hour" else "12-hour"),
+                      "Usage access: " + (if (hasUsageAccess()) "On" else "Off (tap to enable)"),
                       "Hidden apps (" + prefs.hidden.count { allApps.containsKey(it) } + ")",
                       "System settings (Wi-Fi, etc.)"
                   )
@@ -845,15 +1194,38 @@ jobs:
                           when (w) {
                               0 -> askCity()
                               1 -> { prefs.fahrenheit = !prefs.fahrenheit; refreshWeather(true); showSettings() }
-                              2 -> { prefs.tileSize = (prefs.tileSize + 1) % 3; applyLayoutPrefs(); showSettings() }
-                              3 -> { prefs.rows = if (prefs.rows == 1) 2 else 1; applyLayoutPrefs(); showSettings() }
-                              4 -> { prefs.bg = (prefs.bg + 1) % bgNames.size; applyBackground(); showSettings() }
-                              5 -> { prefs.clock24 = !prefs.clock24; applyClock(); showSettings() }
-                              6 -> showHidden()
-                              7 -> try { startActivity(Intent(Settings.ACTION_SETTINGS)) } catch (e: Exception) { }
+                              2 -> {
+                                  if (prefs.sortMode == 0) { seedManualOrder(); prefs.sortMode = 1 } else prefs.sortMode = 0
+                                  updateRowLabel()
+                                  rebuildList(-1)
+                                  showSettings()
+                              }
+                              3 -> { prefs.tileSize = (prefs.tileSize + 1) % 3; applyLayoutPrefs(); showSettings() }
+                              4 -> { prefs.rows = if (prefs.rows == 1) 2 else 1; applyLayoutPrefs(); showSettings() }
+                              5 -> { prefs.bg = (prefs.bg + 1) % bgNames.size; applyBackground(); showSettings() }
+                              6 -> { prefs.clock24 = !prefs.clock24; applyClock(); showSettings() }
+                              7 -> {
+                                  if (hasUsageAccess()) {
+                                      Toast.makeText(this, "Usage access is already on", Toast.LENGTH_SHORT).show()
+                                      showSettings()
+                                  } else {
+                                      try {
+                                          startActivity(Intent(Settings.ACTION_USAGE_ACCESS_SETTINGS))
+                                      } catch (e: Exception) {
+                                          Toast.makeText(
+                                              this,
+                                              "This TV has no usage-access screen. Apps you open from here are still tracked.",
+                                              Toast.LENGTH_LONG
+                                          ).show()
+                                          showSettings()
+                                      }
+                                  }
+                              }
+                              8 -> showHidden()
+                              9 -> try { startActivity(Intent(Settings.ACTION_SETTINGS)) } catch (e: Exception) { }
                           }
                       }
-                      .show()
+                      .showStyled()
               }
 
               private fun showHidden() {
@@ -875,7 +1247,7 @@ jobs:
                           showSettings()
                       }
                       .setNegativeButton("Cancel") { _, _ -> showSettings() }
-                      .show()
+                      .showStyled()
               }
 
               private fun askCity() {
@@ -890,7 +1262,7 @@ jobs:
                           if (q.isEmpty()) showSettings() else searchCity(q)
                       }
                       .setNegativeButton("Cancel") { _, _ -> showSettings() }
-                      .show()
+                      .showStyled()
               }
 
               private fun searchCity(q: String) {
@@ -910,7 +1282,7 @@ jobs:
                                       refreshWeather(true)
                                       showSettings()
                                   }
-                                  .show()
+                                  .showStyled()
                           }
                       }
                   }
@@ -951,18 +1323,35 @@ jobs:
 
               private fun showWeather(wx: Weather.Wx) {
                   val d = Weather.describe(wx.code)
-                  tvTemp.text = d.first + "  " + wx.temp + "°"
+                  tvTemp.text = d.first + " " + wx.temp + "°"
                   tvDesc.text = d.second + "  ·  H " + wx.hi + "°  L " + wx.lo + "°  ·  " + prefs.city
                   forecast.removeAllViews()
                   for (day in wx.days.drop(1)) {
+                      val col = LinearLayout(this)
+                      col.orientation = LinearLayout.VERTICAL
+                      col.gravity = Gravity.CENTER_HORIZONTAL
+                      col.setPadding(dp(12), 0, dp(12), 0)
+                      val n = TextView(this)
+                      n.text = day.name
+                      n.textSize = 12f
+                      n.gravity = Gravity.CENTER
+                      n.setTextColor(0xB3FFFFFF.toInt())
+                      val e = TextView(this)
+                      e.text = Weather.describe(day.code).first
+                      e.textSize = 22f
+                      e.gravity = Gravity.CENTER
                       val t = TextView(this)
+                      t.text = day.hi.toString() + "° " + day.lo + "°"
+                      t.textSize = 12f
                       t.gravity = Gravity.CENTER
-                      t.setTextColor(0xCCFFFFFF.toInt())
-                      t.textSize = 15f
-                      t.text = day.name + "\n" + Weather.describe(day.code).first + "\n" + day.hi + "° / " + day.lo + "°"
-                      t.setPadding(0, 0, dp(28), 0)
-                      forecast.addView(t)
+                      t.setTextColor(Color.WHITE)
+                      col.addView(n)
+                      col.addView(e)
+                      col.addView(t)
+                      forecast.addView(col)
                   }
+                  forecast.alpha = 0f
+                  forecast.animate().alpha(1f).setDuration(400).start()
               }
           }
           TVHOME_EOF
